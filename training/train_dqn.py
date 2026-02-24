@@ -1,60 +1,81 @@
+import argparse
 import numpy as np
+import torch
 
 from src.envs import make_env
 from src.logging import save_run
-from src.agents.dqn import DQNAgent 
+from src.agents.dqn import DQNAgent
+
+
+def seed_everything(seed: int) -> None:
+    import random
+    import numpy as np
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def mean_last(rewards, n: int) -> float:
+    if len(rewards) == 0:
+        return float("nan")
+    n = min(n, len(rewards))
+    return float(np.mean(rewards[-n:]))
 
 
 def main():
-    env_id = "CartPole-v1"
-    seed = 0
-    num_episodes = 800
-    max_steps = 500
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env_id", type=str, default="CartPole-v1")
+    parser.add_argument("--episodes", type=int, default=1000)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--max_steps", type=int, default=500)
 
-    gamma = 0.99
-    lr = 1e-3
-    buffer_size = 50_000
-    batch_size = 64
-    epsilon_start = 1.0
-    epsilon_end = 0.05
-    epsilon_decay_steps = 20_000
-    target_update_freq = 1000
-    device = "cpu"
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--buffer_size", type=int, default=50_000)
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--epsilon_start", type=float, default=1.0)
+    parser.add_argument("--epsilon_end", type=float, default=0.05)
+    parser.add_argument("--epsilon_decay_steps", type=int, default=20_000)
+    parser.add_argument("--target_update_freq", type=int, default=1000)
+    parser.add_argument("--device", type=str, default="cpu")
+    args = parser.parse_args()
 
-    env = make_env(env_id, seed=seed)
+    seed_everything(args.seed)
+
+    env = make_env(args.env_id, seed=args.seed)
     obs_dim = env.observation_space.shape[0]
     n_actions = env.action_space.n
 
     agent = DQNAgent(
         obs_dim=obs_dim,
         n_actions=n_actions,
-        gamma=gamma,
-        lr=lr,
-        buffer_size=buffer_size,
-        batch_size=batch_size,
-        epsilon_start=epsilon_start,
-        epsilon_end=epsilon_end,
-        epsilon_decay_steps=epsilon_decay_steps,
-        target_update_freq=target_update_freq,
-        device=device,
+        gamma=args.gamma,
+        lr=args.lr,
+        buffer_size=args.buffer_size,
+        batch_size=args.batch_size,
+        epsilon_start=args.epsilon_start,
+        epsilon_end=args.epsilon_end,
+        epsilon_decay_steps=args.epsilon_decay_steps,
+        target_update_freq=args.target_update_freq,
+        device=args.device,
     )
 
     rewards = []
     epsilons = []
 
-    for ep in range(num_episodes):
+    for ep in range(args.episodes):
         obs, _ = env.reset()
         ep_reward = 0.0
 
-        for _ in range(max_steps):
+        for _ in range(args.max_steps):
             action = agent.act(obs)
             next_obs, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
             agent.observe(obs, action, reward, next_obs, done)
-
             agent.update()
-
             agent.update_epsilon()
 
             ep_reward += reward
@@ -63,7 +84,7 @@ def main():
             if done:
                 break
 
-        rewards.append(ep_reward)
+        rewards.append(float(ep_reward))
         epsilons.append(float(agent.epsilon))
 
         if (ep + 1) % 25 == 0:
@@ -73,24 +94,24 @@ def main():
             )
 
     run_data = {
-        "env_id": env_id,
+        "env_id": args.env_id,
         "agent": "dqn",
-        "seed": seed,
-        "num_episodes": int(num_episodes),
+        "seed": int(args.seed),
+        "num_episodes": int(args.episodes),
         "hyperparameters": {
-            "gamma": gamma,
-            "lr": lr,
-            "buffer_size": buffer_size,
-            "batch_size": batch_size,
-            "epsilon_start": epsilon_start,
-            "epsilon_end": epsilon_end,
-            "epsilon_decay_steps": epsilon_decay_steps,
-            "target_update_freq": target_update_freq,
-            "max_steps": max_steps,
-            "device": device,
+            "gamma": args.gamma,
+            "lr": args.lr,
+            "buffer_size": args.buffer_size,
+            "batch_size": args.batch_size,
+            "epsilon_start": args.epsilon_start,
+            "epsilon_end": args.epsilon_end,
+            "epsilon_decay_steps": args.epsilon_decay_steps,
+            "target_update_freq": args.target_update_freq,
+            "max_steps": args.max_steps,
+            "device": args.device,
         },
-        "reward_mean_last_100": float(np.mean(rewards[-100:])),
-        "rewards": [float(r) for r in rewards],
+        "reward_mean_last_100": mean_last(rewards, 100),
+        "rewards": rewards,
         "epsilons": epsilons,
         "total_steps": int(agent.total_steps),
     }

@@ -1,45 +1,67 @@
+import argparse
 import numpy as np
+import torch
 
 from src.envs import make_env
 from src.logging import save_run
 from src.agents.reinforce_baseline import ReinforceBaselineAgent
 
 
+def seed_everything(seed: int) -> None:
+    import random
+    import numpy as np
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def mean_last(rewards, n: int) -> float:
+    if len(rewards) == 0:
+        return float("nan")
+    n = min(n, len(rewards))
+    return float(np.mean(rewards[-n:]))
+
+
 def main():
-    env_id = "CartPole-v1"
-    seed = 0
-    num_episodes = 800
-    max_steps = 500
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env_id", type=str, default="CartPole-v1")
+    parser.add_argument("--episodes", type=int, default=1000)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--max_steps", type=int, default=500)
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--hidden", type=int, default=128)
+    parser.add_argument("--lr_policy", type=float, default=1e-3)
+    parser.add_argument("--lr_value", type=float, default=1e-3)
+    parser.add_argument("--device", type=str, default="cpu")
+    args = parser.parse_args()
 
-    gamma = 0.99
-    hidden = 128
-    lr_policy = 1e-3
-    lr_value = 1e-3
-    device = "cpu"
+    seed_everything(args.seed)
 
-    env = make_env(env_id, seed=seed)
+    env = make_env(args.env_id, seed=args.seed)
     obs_dim = env.observation_space.shape[0]
     n_actions = env.action_space.n
 
     agent = ReinforceBaselineAgent(
         obs_dim=obs_dim,
         act_dim=n_actions,
-        hidden=hidden,
-        gamma=gamma,
-        lr_policy=lr_policy,
-        lr_value=lr_value,
-        device=device,
+        hidden=args.hidden,
+        gamma=args.gamma,
+        lr_policy=args.lr_policy,
+        lr_value=args.lr_value,
+        device=args.device,
     )
 
     rewards = []
     actor_losses = []
     critic_losses = []
 
-    for ep in range(num_episodes):
+    for ep in range(args.episodes):
         obs, _ = env.reset()
         ep_reward = 0.0
 
-        for _ in range(max_steps):
+        for _ in range(args.max_steps):
             action = agent.act(obs)
             next_obs, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
@@ -53,7 +75,7 @@ def main():
                 break
 
         actor_loss, critic_loss = agent.end_episode()
-        rewards.append(ep_reward)
+        rewards.append(float(ep_reward))
         actor_losses.append(float(actor_loss))
         critic_losses.append(float(critic_loss))
 
@@ -64,22 +86,22 @@ def main():
             )
 
     run_data = {
-        "env_id": env_id,
+        "env_id": args.env_id,
         "agent": "reinforce_baseline",
-        "seed": seed,
-        "num_episodes": int(num_episodes),
+        "seed": int(args.seed),
+        "num_episodes": int(args.episodes),
         "hyperparameters": {
-            "gamma": gamma,
-            "hidden": hidden,
-            "lr_policy": lr_policy,
-            "lr_value": lr_value,
-            "max_steps": max_steps,
-            "device": device,
+            "gamma": args.gamma,
+            "hidden": args.hidden,
+            "lr_policy": args.lr_policy,
+            "lr_value": args.lr_value,
+            "max_steps": args.max_steps,
+            "device": args.device,
         },
-        "reward_mean_last_100": float(np.mean(rewards[-100:])),
-        "rewards": [float(r) for r in rewards],
-        "actor_losses": [float(x) for x in actor_losses],
-        "critic_losses": [float(x) for x in critic_losses],
+        "reward_mean_last_100": mean_last(rewards, 100),
+        "rewards": rewards,
+        "actor_losses": actor_losses,
+        "critic_losses": critic_losses,
     }
 
     out_path = save_run(run_data, prefix="reinforce_baseline")
